@@ -1,0 +1,39 @@
+{
+  "compress_provider_id": {
+    "description": "Optional provider id override for compression. When set, overrides AstrBot core `provider_settings.llm_compress_provider_id`. `--provider` on the command line overrides this.",
+    "type": "string",
+    "default": "",
+    "hint": "e.g. deepseek-v3, gpt-4o-mini. Leave empty to use core config."
+  },
+  "keep_recent_ratio": {
+    "description": "Default keep_recent_ratio passed to LLMSummaryCompressor. Clamped to [0, 0.3]. Command-line `--keep` overrides this.",
+    "type": "float",
+    "default": 0.15,
+    "min": 0,
+    "max": 0.3,
+    "hint": "0.0 ~ 0.3"
+  },
+  "instruction_text": {
+    "description": "Optional custom summary instruction. Empty uses the built-in default.",
+    "type": "string",
+    "default": "",
+    "hint": "Natural language guidance for the summarizer."
+  },
+  "min_messages": {
+    "description": "Below this message count, /compact replies with a hint and skips compression.",
+    "type": "int",
+    "default": 4,
+    "min": 1
+  },
+  "show_summary": {
+    "description": "Reply with a short Chinese message indicating success and (if available) the summary.",
+    "type": "bool",
+    "default": true
+  },
+  "summary_max_chars": {
+    "description": "Maximum number of characters of the LLM summary to inline in the reply.",
+    "type": "int",
+    "default": 800,
+    "min": 50
+  }
+}
