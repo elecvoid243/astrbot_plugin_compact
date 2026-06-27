@@ -1,12 +1,12 @@
 {
   "compress_provider_id": {
-    "description": "Optional provider id override for compression. When set, overrides AstrBot core `provider_settings.llm_compress_provider_id`. `--provider` on the command line overrides this.",
+    "description": "Optional provider id override for compression. When set, overrides AstrBot core `provider_settings.llm_compress_provider_id`. `provider <id>` on the command line overrides this.",
     "type": "string",
     "default": "",
     "hint": "e.g. deepseek-v3, gpt-4o-mini. Leave empty to use core config."
   },
   "keep_recent_ratio": {
-    "description": "Default keep_recent_ratio passed to LLMSummaryCompressor. Clamped to [0, 0.3]. Command-line `--keep` overrides this.",
+    "description": "Default keep_recent_ratio passed to LLMSummaryCompressor. Clamped to [0, 0.3]. `keep <0~0.3>` on the command line overrides this.",
     "type": "float",
     "default": 0.15,
     "min": 0,
@@ -35,5 +35,11 @@
     "type": "int",
     "default": 800,
     "min": 50
+  },
+  "default_focus": {
+    "description": "Default focus topic to append to every /compact run. Empty means no default focus.",
+    "type": "string",
+    "default": "",
+    "hint": "e.g. 鉴权重构. Use `/compact set focus <text>` to change at runtime."
   }
 }
