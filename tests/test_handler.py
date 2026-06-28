@@ -11,6 +11,19 @@ from unittest.mock import AsyncMock, MagicMock
 from main import CompactPlugin
 
 
+def _body(subcommand: str, body: str = "") -> str:
+    """Build the full message string that AstrBot produces after wake/strip.
+
+    Models the state of ``event.get_message_str()`` **after** WakingCheck
+    has stripped the ``/`` prefix.  The ``compact <subcommand>`` prefix is
+    still present and will be removed by :meth:`_extract_command_body`.
+    """
+    s = f"compact {subcommand}"
+    if body:
+        s += " " + body
+    return s
+
+
 def _make_provider(text: str = "summary text") -> MagicMock:
     """A mock provider that returns a fixed summary on text_chat."""
 
@@ -111,7 +124,8 @@ def test_handler_refuses_when_no_provider() -> None:
 
     event = _make_event()
 
-    asyncio.run(plugin.compact_run(event, ""))  # type: ignore[arg-type]
+    event.get_message_str.return_value = "/compact run"
+    asyncio.run(plugin.compact_run(event))  # type: ignore[arg-type]
 
     event.set_result.assert_called_once()
 
@@ -140,7 +154,8 @@ def test_handler_refuses_when_no_conversation() -> None:
 
     event = _make_event()
 
-    asyncio.run(plugin.compact_run(event, ""))  # type: ignore[arg-type]
+    event.get_message_str.return_value = "/compact run"
+    asyncio.run(plugin.compact_run(event))  # type: ignore[arg-type]
 
     event.set_result.assert_called_once()
 
@@ -171,7 +186,8 @@ def test_handler_refuses_when_too_few_messages() -> None:
 
     event = _make_event()
 
-    asyncio.run(plugin.compact_run(event, ""))  # type: ignore[arg-type]
+    event.get_message_str.return_value = "/compact run"
+    asyncio.run(plugin.compact_run(event))  # type: ignore[arg-type]
 
     event.set_result.assert_called_once()
 
@@ -218,7 +234,8 @@ def test_handler_compresses_and_saves() -> None:
 
     event = _make_event()
 
-    asyncio.run(plugin.compact_run(event, ""))  # type: ignore[arg-type]
+    event.get_message_str.return_value = "/compact run"
+    asyncio.run(plugin.compact_run(event))  # type: ignore[arg-type]
 
     # Compressor ran and called update_conversation with a new history list.
 
@@ -270,7 +287,8 @@ def test_handler_respects_keep_override() -> None:
 
     event = _make_event()
 
-    asyncio.run(plugin.compact_run(event, "keep 0.30"))  # type: ignore[arg-type]
+    event.get_message_str.return_value = "/compact run keep 0.30"
+    asyncio.run(plugin.compact_run(event))  # type: ignore[arg-type]
 
     # We can't directly inspect the compactor, but we know the path was exercised
 
@@ -311,7 +329,8 @@ def test_handler_provider_command_line_override() -> None:
 
     event = _make_event()
 
-    asyncio.run(plugin.compact_run(event, "provider deepseek-v3"))  # type: ignore[arg-type]
+    event.get_message_str.return_value = "/compact run provider deepseek-v3"
+    asyncio.run(plugin.compact_run(event))  # type: ignore[arg-type]
 
     # The explicit provider should have been called (AsyncMock lets us verify).
 
@@ -361,7 +380,8 @@ def test_handler_no_op_on_llm_failure() -> None:
 
     # The handler should still reply successfully.
 
-    asyncio.run(plugin.compact_run(event, ""))  # type: ignore[arg-type]
+    event.get_message_str.return_value = "/compact run"
+    asyncio.run(plugin.compact_run(event))  # type: ignore[arg-type]
 
     plugin.context.conversation_manager.update_conversation.assert_called_once()
 
@@ -464,7 +484,8 @@ def test_preview_subcommand_does_not_call_provider() -> None:
     asyncio.run(plugin.initialize())
     event = _make_event()
 
-    asyncio.run(plugin.compact_preview(event, ""))  # type: ignore[arg-type]
+    event.get_message_str.return_value = "/compact preview"
+    asyncio.run(plugin.compact_preview(event))  # type: ignore[arg-type]
 
     event.set_result.assert_called_once()
     # Critical: provider.text_chat must not have been called
@@ -485,7 +506,8 @@ def test_preview_subcommand_below_threshold_says_no_compress() -> None:
     plugin.min_messages = 10  # ensure threshold higher than 0
     event = _make_event()
 
-    asyncio.run(plugin.compact_preview(event, ""))  # type: ignore[arg-type]
+    event.get_message_str.return_value = "/compact preview"
+    asyncio.run(plugin.compact_preview(event))  # type: ignore[arg-type]
 
     event.set_result.assert_called_once()
     result = event._result_holder["result"]
@@ -531,41 +553,16 @@ def test_set_subcommand_updates_memory_immediately() -> None:
     asyncio.run(plugin.initialize())
     event = _make_event()
 
-    # Patch the persistence API to avoid touching real AstrBot data dir.
-    fake_disk_writes: list[tuple[str, str, object]] = []
-
-    def fake_update_config(namespace: str, key: str, value: object) -> None:
-        fake_disk_writes.append((namespace, key, value))
-
-    import main
-
-    original = getattr(main, "CONFIG_NAMESPACE", "astrbot_plugin_compact")
-    assert original == "astrbot_plugin_compact"
-
-    # monkey-patch the lazy import inside compact_set
-    import sys
-
-    fake_module = type(sys)("fake_star_config")
-    fake_module.update_config = fake_update_config
-    sys.modules["astrbot.core.star.config"] = fake_module
-    try:
-        asyncio.run(plugin.compact_set(event, "keep 0.20"))  # type: ignore[arg-type]
-    finally:
-        del sys.modules["astrbot.core.star.config"]
+    event.get_message_str.return_value = "/compact set keep 0.20"
+    asyncio.run(plugin.compact_set(event))  # type: ignore[arg-type]
 
     # In-memory update happened
     assert plugin.keep_recent_ratio == 0.20
-    # Persisted to disk
-    assert any(
-        ns == "astrbot_plugin_compact" and k == "keep_recent_ratio" and v == 0.20
-        for (ns, k, v) in fake_disk_writes
-    )
-
     event.set_result.assert_called_once()
     result = event._result_holder["result"]
     plain_texts = [comp.text for comp in result.chain if hasattr(comp, "text")]
     text = " ".join(plain_texts)
-    assert "已持久化" in text
+    assert "临时生效" in text
     assert "keep_recent_ratio" in text
 
 
@@ -575,28 +572,12 @@ def test_set_subcommand_supports_multiple_keys() -> None:
     asyncio.run(plugin.initialize())
     event = _make_event()
 
-    fake_disk_writes: list[tuple[str, str, object]] = []
-
-    def fake_update_config(namespace: str, key: str, value: object) -> None:
-        fake_disk_writes.append((namespace, key, value))
-
-    import sys
-
-    fake_module = type(sys)("fake_star_config2")
-    fake_module.update_config = fake_update_config
-    sys.modules["astrbot.core.star.config"] = fake_module
-    try:
-        asyncio.run(
-            plugin.compact_set(event, "keep 0.1 provider deepseek-r1")  # type: ignore[arg-type]
-        )
-    finally:
-        del sys.modules["astrbot.core.star.config"]
+    event.get_message_str.return_value = "/compact set keep 0.1 provider deepseek-r1"
+    asyncio.run(plugin.compact_set(event))  # type: ignore[arg-type]
 
     assert plugin.keep_recent_ratio == 0.1
     assert plugin.compress_provider_id == "deepseek-r1"
-    keys_written = {k for (_ns, k, _v) in fake_disk_writes}
-    assert "keep_recent_ratio" in keys_written
-    assert "compress_provider_id" in keys_written
+    event.set_result.assert_called_once()
 
 
 def test_set_subcommand_rejects_unknown_value_silently_via_error() -> None:
@@ -606,7 +587,8 @@ def test_set_subcommand_rejects_unknown_value_silently_via_error() -> None:
     original_keep = plugin.keep_recent_ratio
     event = _make_event()
 
-    asyncio.run(plugin.compact_set(event, "keep abc"))  # type: ignore[arg-type]
+    event.get_message_str.return_value = "/compact set keep abc"
+    asyncio.run(plugin.compact_set(event))  # type: ignore[arg-type]
 
     # State unchanged
     assert plugin.keep_recent_ratio == original_keep
@@ -617,6 +599,43 @@ def test_set_subcommand_rejects_unknown_value_silently_via_error() -> None:
     assert "失败" in text
 
 
+def test_set_subcommand_accepts_long_form_canonical_keys() -> None:
+    """/compact set keep_recent_ratio 0.20 must work (regression: parser used to
+    only accept short aliases, which made `/compact set` look broken for users
+    who copy-pasted the key name from `/compact config`).
+    """
+    plugin = CompactPlugin(context=_make_context())
+    asyncio.run(plugin.initialize())
+    event = _make_event()
+
+    event.get_message_str.return_value = "/compact set keep_recent_ratio 0.20"
+    asyncio.run(plugin.compact_set(event))  # type: ignore[arg-type]
+
+    # In-memory state changed
+    assert plugin.keep_recent_ratio == 0.20
+    # Success reply
+    event.set_result.assert_called_once()
+    result = event._result_holder["result"]
+    plain_texts = [comp.text for comp in result.chain if hasattr(comp, "text")]
+    assert "临时生效" in " ".join(plain_texts)
+
+
+def test_set_subcommand_accepts_long_form_provider_and_default_focus() -> None:
+    """/compact set compress_provider_id / default_focus 也用长名。"""
+    plugin = CompactPlugin(context=_make_context())
+    asyncio.run(plugin.initialize())
+    event = _make_event()
+
+    event.get_message_str.return_value = (
+        "/compact set compress_provider_id deepseek-v3 default_focus 鉴权重构"
+    )
+    asyncio.run(plugin.compact_set(event))  # type: ignore[arg-type]
+
+    assert plugin.compress_provider_id == "deepseek-v3"
+    assert plugin.default_focus == "鉴权重构"
+    event.set_result.assert_called_once()
+
+
 def test_set_subcommand_rejects_extra_focus_text() -> None:
     """/compact set 不允许非 key-value 自由文本(应原子性整体拒绝)."""
     plugin = CompactPlugin(context=_make_context())
@@ -624,9 +643,10 @@ def test_set_subcommand_rejects_extra_focus_text() -> None:
     original_keep = plugin.keep_recent_ratio
     event = _make_event()
 
-    asyncio.run(plugin.compact_set(event, "keep 0.1 鉴权"))  # type: ignore[arg-type]
+    event.get_message_str.return_value = "/compact set keep 0.1 鉴权"
+    asyncio.run(plugin.compact_set(event))  # type: ignore[arg-type]
 
-    # 整个 set 应被拒绝(任何 key 都不应被写)
+    # 整个 set 应被拒绝(任何 key 不应被写)
     assert plugin.keep_recent_ratio == original_keep
     event.set_result.assert_called_once()
     result = event._result_holder["result"]
@@ -634,3 +654,48 @@ def test_set_subcommand_rejects_extra_focus_text() -> None:
     text = " ".join(plain_texts)
     assert "自由文本" in text
     assert "鉴权" in text
+
+
+# === Regression: GreedyStr workaround =======================================
+
+
+def test_extract_command_body_preserves_all_tokens() -> None:
+    """_extract_command_body 必须保留所有空白分隔的 token（回归测试 #1）。
+
+    AstrBot 当前的 ``validate_and_convert_params`` 对 ``GreedyStr("")``
+    实例作 ``is`` 身份比较（不是 isinstance），导致多 token 输入被截断到
+    第一个 token。本实现的 ``_extract_command_body`` 直接从
+    ``event.get_message_str()`` 取完整正文并手动剥离命令前缀，不受此 bug
+    影响。
+    """
+    event = _make_event(_body("set", "keep 0.2"))
+    body = CompactPlugin._extract_command_body(event, "set")
+    assert body == "keep 0.2", f"expected 'keep 0.2', got {body!r}"
+
+
+def test_extract_command_body_works_with_three_tokens() -> None:
+    """三个以上 token 也能完整保留。"""
+    event = _make_event(_body("run", "keep 0.20 provider gpt-4o 鉴权"))
+    body = CompactPlugin._extract_command_body(event, "run")
+    assert body == "keep 0.20 provider gpt-4o 鉴权", f"got {body!r}"
+
+
+def test_extract_command_body_empty_on_no_args() -> None:
+    """没有参数时返回空字符串。"""
+    event = _make_event(_body("run"))
+    body = CompactPlugin._extract_command_body(event, "run")
+    assert body == "", f"got {body!r}"
+
+
+def test_extract_command_body_strips_wake_prefix() -> None:
+    """即使包含唤醒前缀 / 也能正确剥离。"""
+    event = _make_event("/" + _body("preview", "keep 0.3"))
+    body = CompactPlugin._extract_command_body(event, "preview")
+    assert body == "keep 0.3", f"got {body!r}"
+
+
+def test_extract_command_body_case_insensitive() -> None:
+    """大小写不敏感匹配。"""
+    event = _make_event("COMPACT RUN keep 0.2")
+    body = CompactPlugin._extract_command_body(event, "run")
+    assert body == "keep 0.2", f"got {body!r}"

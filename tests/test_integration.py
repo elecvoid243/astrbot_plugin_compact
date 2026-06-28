@@ -141,7 +141,8 @@ def test_e2e_realistic_summary_persists_to_history() -> None:
 
     event = _make_event()
 
-    asyncio.run(plugin.compact_run(event, "重构鉴权"))  # type: ignore[arg-type]
+    event.get_message_str.return_value = "/compact run 重构鉴权"
+    asyncio.run(plugin.compact_run(event))  # type: ignore[arg-type]
 
     # LLM was called exactly once (single summary call).
 
@@ -218,7 +219,8 @@ def test_e2e_no_compression_below_threshold_preserves_history() -> None:
 
     event = _make_event()
 
-    asyncio.run(plugin.compact_run(event, ""))  # type: ignore[arg-type]
+    event.get_message_str.return_value = "/compact run"
+    asyncio.run(plugin.compact_run(event))  # type: ignore[arg-type]
 
     provider.text_chat.assert_not_called()
 
@@ -267,7 +269,8 @@ def test_e2e_focus_instruction_combined_with_config() -> None:
 
     event = _make_event()
 
-    asyncio.run(plugin.compact_run(event, "重构鉴权"))  # type: ignore[arg-type]
+    event.get_message_str.return_value = "/compact run 重构鉴权"
+    asyncio.run(plugin.compact_run(event))  # type: ignore[arg-type]
 
     provider.text_chat.assert_called_once()
 
@@ -343,7 +346,8 @@ def test_e2e_summary_excerpt_truncation() -> None:
 
     event = _make_event()
 
-    asyncio.run(plugin.compact_run(event, ""))  # type: ignore[arg-type]
+    event.get_message_str.return_value = "/compact run"
+    asyncio.run(plugin.compact_run(event))  # type: ignore[arg-type]
 
     result = event._result_holder["result"]
 

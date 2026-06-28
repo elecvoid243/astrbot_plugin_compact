@@ -41,3 +41,6 @@ coverage.xml
 *.swo
 .DS_Store
 Thumbs.db
+
+./codegraph
+.ruff_cache

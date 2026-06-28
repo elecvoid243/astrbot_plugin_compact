@@ -137,7 +137,96 @@ def test_overrides_handles_quoted_strings() -> None:
 
 def test_known_override_keys_covers_all_keys() -> None:
     keys = known_override_keys()
+    # Short aliases
     assert {"keep", "provider", "min", "summary", "chars", "focus"} <= keys
+    # Canonical long-form keys (visible in /compact config & WebUI)
+    assert {
+        "keep_recent_ratio",
+        "compress_provider_id",
+        "min_messages",
+        "summary_max_chars",
+        "show_summary",
+        "default_focus",
+    } <= keys
+
+
+# === canonical (long-form) key aliases — regression for /compact set =========
+# Regression: 用户从 /compact config 看到的是规范长名(如 keep_recent_ratio),
+# 之前 parser 只识别短名,导致长名被静默吞进 focus,set 看起来"不起作用"。
+
+
+def test_overrides_long_form_keep_value() -> None:
+    """`/compact set keep_recent_ratio 0.20` 必须解析为 overrides。"""
+    result = parse_compact_overrides("keep_recent_ratio 0.20")
+    assert result.overrides == {"keep_recent_ratio": 0.20}
+    assert result.focus == ""
+    assert result.errors == []
+
+
+def test_overrides_long_form_provider_value() -> None:
+    result = parse_compact_overrides("compress_provider_id deepseek-r1")
+    assert result.overrides == {"compress_provider_id": "deepseek-r1"}
+    assert result.focus == ""
+
+
+def test_overrides_long_form_min_value() -> None:
+    result = parse_compact_overrides("min_messages 6")
+    assert result.overrides == {"min_messages": 6}
+
+
+def test_overrides_long_form_summary_on() -> None:
+    r1 = parse_compact_overrides("show_summary on")
+    assert r1.overrides == {"show_summary": True}
+    r2 = parse_compact_overrides("show_summary off")
+    assert r2.overrides == {"show_summary": False}
+
+
+def test_overrides_long_form_chars_value() -> None:
+    result = parse_compact_overrides("summary_max_chars 500")
+    assert result.overrides == {"summary_max_chars": 500}
+
+
+def test_overrides_long_form_default_focus() -> None:
+    result = parse_compact_overrides("default_focus 鉴权重构")
+    assert result.overrides == {"default_focus": "鉴权重构"}
+
+
+def test_overrides_short_and_long_aliases_target_same_canonical() -> None:
+    """短名与规范长名必须落到同一个 canonical key。"""
+    short = parse_compact_overrides("keep 0.20")
+    long = parse_compact_overrides("keep_recent_ratio 0.20")
+    assert short.overrides == long.overrides == {"keep_recent_ratio": 0.20}
+
+    short_p = parse_compact_overrides("provider gpt-4o")
+    long_p = parse_compact_overrides("compress_provider_id gpt-4o")
+    assert short_p.overrides == long_p.overrides == {"compress_provider_id": "gpt-4o"}
+
+
+def test_overrides_long_form_clamps_keep_ratio() -> None:
+    """规范长名的 keep_recent_ratio 也得走 clamp 逻辑。"""
+    hi = parse_compact_overrides("keep_recent_ratio 5.0")
+    assert hi.overrides["keep_recent_ratio"] == 0.3
+    lo = parse_compact_overrides("keep_recent_ratio -1.0")
+    assert lo.overrides["keep_recent_ratio"] == 0.0
+
+
+def test_overrides_long_form_invalid_value_records_error() -> None:
+    """规范长名 + 非法值仍然要走 error path。"""
+    result = parse_compact_overrides("keep_recent_ratio abc")
+    assert "keep_recent_ratio" not in result.overrides
+    assert any("keep_recent_ratio" in e for e in result.errors)
+
+
+def test_overrides_mixed_short_and_long_in_one_call() -> None:
+    """一次命令中混用短名 + 长名应都生效。"""
+    result = parse_compact_overrides(
+        "keep_recent_ratio 0.10 provider deepseek-r1 min 8"
+    )
+    assert result.overrides == {
+        "keep_recent_ratio": 0.10,
+        "compress_provider_id": "deepseek-r1",
+        "min_messages": 8,
+    }
 
 
 # === parse_compact_args(legacy shim) =====================================

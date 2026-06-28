@@ -16,7 +16,6 @@ from astrbot.core.agent.message import (
     bind_checkpoint_messages,
     dump_messages_with_checkpoints,
 )
-from astrbot.core.star.filter.command import GreedyStr
 
 try:
     from .compressor import Compactor  # package context (AstrBot runtime)
@@ -25,9 +24,6 @@ except ImportError:  # pragma: no cover - direct script / pytest
 
 if TYPE_CHECKING:
     from astrbot.core.provider.provider import Provider
-
-# 持久化 namespace, 来自 metadata.yaml 的 name 字段
-CONFIG_NAMESPACE = "astrbot_plugin_compact"
 
 
 def _parse_bool(s: str) -> bool | None:
@@ -50,26 +46,61 @@ _CONFIG_ATTR_BY_KEY: dict[str, str] = {
     "default_focus": "default_focus",
 }
 
-# 短名 -> 配置项实际 key 的映射(用户友好)
+# key 别名 -> 配置项实际 key
+# 同时支持"短名"(用户友好,例如 keep / provider)和"规范长名"
+# (与 /compact config、WebUI 配置面板字段一致,例如 keep_recent_ratio /
+# compress_provider_id)。两者映射到同一个 canonical key,互不影响。
 _KEY_ALIASES: dict[str, str] = {
+    # 短名(用户友好)
     "keep": "keep_recent_ratio",
     "provider": "compress_provider_id",
     "min": "min_messages",
     "focus": "default_focus",
     "summary": "show_summary",
     "chars": "summary_max_chars",
+    # 规范长名(与 WebUI 配置项同名,放在 /compact config 输出中)
+    "keep_recent_ratio": "keep_recent_ratio",
+    "compress_provider_id": "compress_provider_id",
+    "min_messages": "min_messages",
+    "default_focus": "default_focus",
+    "show_summary": "show_summary",
+    "summary_max_chars": "summary_max_chars",
 }
 
-# 短名 -> (解析器, 是否数值)
+# 别名 -> (解析器, 是否数值)
+# 短名与规范长名共用同一份解析逻辑,因此同名 key 注册两次。
 _KEY_PARSERS: dict[str, tuple[callable, bool]] = {
-    # key      # parse_fn            # is_numeric (clamp/min semantics)
+    # key                # parse_fn       # is_numeric (clamp/min semantics)
     "keep": (float, True),
+    "keep_recent_ratio": (float, True),
     "min": (int, True),
+    "min_messages": (int, True),
     "chars": (int, True),
+    "summary_max_chars": (int, True),
     "provider": (str, False),
+    "compress_provider_id": (str, False),
     "focus": (str, False),
+    "default_focus": (str, False),
     "summary": (_parse_bool, False),
+    "show_summary": (_parse_bool, False),
 }
+
+# 暴露给用户的两组 key 集合(用于帮助消息 / 校验):
+# - 短名:keep / provider / min / focus / summary / chars
+# - 规范长名:与 /compact config、WebUI 配置面板字段一致
+SHORT_OVERRIDE_KEYS: frozenset[str] = frozenset(
+    {"keep", "provider", "min", "focus", "summary", "chars"},
+)
+LONG_OVERRIDE_KEYS: frozenset[str] = frozenset(
+    {
+        "keep_recent_ratio",
+        "compress_provider_id",
+        "min_messages",
+        "default_focus",
+        "show_summary",
+        "summary_max_chars",
+    },
+)
 
 
 _KEEP_MAX = 0.3
@@ -261,12 +292,15 @@ def parse_compact_overrides(body: str) -> ParseResult:
 
 
 def known_override_keys() -> set[str]:
-    """Return the set of short-key aliases recognized by the parser.
+    """Return the set of all key aliases recognized by the parser.
 
-    Used by ``/compact set`` to validate input and by ``/compact config``
-    to enumerate the user-facing keys.
+    包含短名(如 ``keep``)与规范长名(如 ``keep_recent_ratio``)。
+    用于 ``/compact set`` 校验输入以及列出所有用户可写的 key。
+
+    Returns:
+        The union of :data:`SHORT_OVERRIDE_KEYS` and :data:`LONG_OVERRIDE_KEYS`.
     """
-    return set(_KEY_ALIASES.keys())
+    return set(SHORT_OVERRIDE_KEYS) | set(LONG_OVERRIDE_KEYS)
 
 
 def resolve_provider(
@@ -381,19 +415,25 @@ class CompactPlugin(star.Star):
         pass
 
     @compact.command("run")
-    async def compact_run(
-        self,
-        event: AstrMessageEvent,
-        text: GreedyStr = GreedyStr(""),  # type: ignore[valid-type]
-    ) -> None:
+    async def compact_run(self, event: AstrMessageEvent) -> None:
         """`/compact run [key value ...] [focus]` — 实际执行 LLM 摘要式压缩。
 
-        Args:
-            event: The current AstrMessageEvent.
-            text: GreedyStr capturing all text after `/compact run`.
-                支持位置 key-value 覆盖,例如 ``keep 0.2 provider x 鉴权``。
+        注意：本实现**不依赖** AstrBot 内置的 ``GreedyStr`` 参数类型。
+        原因：当前 AstrBot 的 ``CommandFilter.init_handler_md`` 会把参数
+        **默认值**存进 ``handler_params``，而 ``validate_and_convert_params``
+        用的是 ``pv is GreedyStr``（身份比较，不是 isinstance），对任何
+        ``GreedyStr("...")`` 实例都判 False。结果多 token 的输入会被截
+        断到第一个空白分隔的 token（例如 ``keep 0.20`` 被截成 ``keep``），
+        进而引发 "keep 后缺少值" 这类误报。
+
+        本插件改为：从 ``event.get_message_str()`` 取整条消息，手动剥掉
+        ``/compact <subcommand>`` 前缀再交给 ``parse_compact_overrides``。
+        这样无论 AstrBot 内部怎么处理参数都能正确拿到完整正文。
+
+        支持位置 key-value 覆盖，例如 ``keep 0.2 provider x 鉴权``。
         """
-        parsed = parse_compact_overrides(str(text))
+        body = self._extract_command_body(event, "run")
+        parsed = parse_compact_overrides(body)
         if parsed.errors:
             # 不静默忽略 — 直接告诉用户
             event.set_result(
@@ -420,20 +460,28 @@ class CompactPlugin(star.Star):
                 "  /compact status                   查看当前会话状态\n"
                 "  /compact preview [选项] [聚焦]     预览压缩效果(不实际压缩)\n"
                 "  /compact config                   查看生效的压缩配置\n"
-                "  /compact set key value [...]       持久化修改配置项\n\n"
+                "  /compact set key value [...]       临时修改配置项\n\n"
                 "**run / preview 子命令的选项(位置参数,无横线):**\n"
-                "  keep <0~0.3>       保留最近消息比例(超出范围自动钳制)\n"
-                "  provider <id>      显式指定用于压缩的 LLM provider\n"
-                "  min <int>          临时覆盖最小压缩阈值\n"
-                "  summary on/off     临时覆盖是否显示摘要\n"
-                "  chars <int>        临时覆盖摘要预览最大字符数\n"
-                "  focus <text>       设置 default_focus\n"
-                "  其余自由文本        临时聚焦话题,LLM 摘要将重点关注\n\n"
+                "  keep <0~0.3>            保留最近消息比例(超出范围自动钳制)\n"
+                "  provider <id>           显式指定用于压缩的 LLM provider\n"
+                "  min <int>               临时覆盖最小压缩阈值\n"
+                "  summary on/off          临时覆盖是否显示摘要\n"
+                "  chars <int>             临时覆盖摘要预览最大字符数\n"
+                "  focus <text>            设置 default_focus\n"
+                "  其余自由文本             临时聚焦话题,LLM 摘要将重点关注\n\n"
+                "**set 子命令的 key 同时支持「短名」与「规范长名」:**\n"
+                "  keep / keep_recent_ratio          <0~0.3>\n"
+                "  provider / compress_provider_id   <id>\n"
+                "  min / min_messages                <int>\n"
+                "  summary / show_summary            on/off\n"
+                "  chars / summary_max_chars         <int>\n"
+                "  focus / default_focus             <text>\n\n"
                 "**示例:**\n"
                 "  /compact run 鉴权重构\n"
                 "  /compact run keep 0.2 provider deepseek-r1 鉴权\n"
                 "  /compact preview keep 0.3\n"
                 "  /compact set keep 0.20\n"
+                "  /compact set keep_recent_ratio 0.20    (规范长名也可)\n"
                 "  /compact set provider deepseek-r1\n\n"
                 "压缩完成后会显示「✅ 压缩完成」及摘要预览。"
             ),
@@ -468,20 +516,17 @@ class CompactPlugin(star.Star):
         event.set_result(MessageEventResult().message(text))
 
     @compact.command("preview")
-    async def compact_preview(
-        self,
-        event: AstrMessageEvent,
-        text: GreedyStr = GreedyStr(""),  # type: ignore[valid-type]
-    ) -> None:
+    async def compact_preview(self, event: AstrMessageEvent) -> None:
         """`/compact preview [key value ...] [focus]` — 预览压缩效果。
 
         不实际调用 LLM,只估算压缩后条数。支持位置 key-value 临时覆盖。
 
-        Args:
-            event: The current AstrMessageEvent.
-            text: GreedyStr capturing all text after `/compact preview`.
+        注意：同 :meth:`compact_run`，**不依赖** AstrBot 的 ``GreedyStr``，
+        通过 :meth:`_extract_command_body` 从 ``event.get_message_str()``
+        拿到完整正文。
         """
-        parsed = parse_compact_overrides(str(text))
+        body = self._extract_command_body(event, "preview")
+        parsed = parse_compact_overrides(body)
         if parsed.errors:
             event.set_result(
                 MessageEventResult().message(
@@ -560,27 +605,23 @@ class CompactPlugin(star.Star):
             f"- `default_focus`: "
             f"`{self.default_focus or '(空)'}` "
             f"(每次压缩默认聚焦的话题)\n\n"
-            f"用 `/compact set <key> <value>` 持久化修改。"
+            f"用 `/compact set <key> <value>` 临时修改。"
         )
         event.set_result(MessageEventResult().message(text))
 
     @compact.command("set")
-    async def compact_set(
-        self,
-        event: AstrMessageEvent,
-        text: GreedyStr = GreedyStr(""),  # type: ignore[valid-type]
-    ) -> None:
-        """`/compact set key value [key value ...]` — 持久化修改配置项。
+    async def compact_set(self, event: AstrMessageEvent) -> None:
+        """`/compact set key value [key value ...]` — 临时修改配置项。
 
-        支持一次修改多项(全部生效,任意一项失败则全部回滚写盘动作)。
-        立即在本次进程内生效(更新 self.*),同时调用 AstrBot 的
-        ``update_config`` API 写入磁盘。
+        仅在本进程内存中生效，**不写盘**。重启插件后恢复为 WebUI 配置值。
+        支持一次修改多项，原子性生效（要么全改要么全不改）。
 
-        Args:
-            event: The current AstrMessageEvent.
-            text: GreedyStr capturing all text after `/compact set`.
+        注意：同 :meth:`compact_run`，**不依赖** AstrBot 的 ``GreedyStr``，
+        通过 :meth:`_extract_command_body` 从 ``event.get_message_str()``
+        拿到完整正文。
         """
-        parsed = parse_compact_overrides(str(text))
+        body = self._extract_command_body(event, "set")
+        parsed = parse_compact_overrides(body)
         if parsed.errors:
             event.set_result(
                 MessageEventResult().message(
@@ -593,9 +634,12 @@ class CompactPlugin(star.Star):
             event.set_result(
                 MessageEventResult().message(
                     "ℹ️ /compact set 需要至少一个 key value 对。\n"
-                    "可用 key: "
-                    + ", ".join(sorted(known_override_keys()))
-                    + "\n示例: `/compact set keep 0.20`"
+                    "可用 key(短名): "
+                    + ", ".join(sorted(SHORT_OVERRIDE_KEYS))
+                    + "\n可用 key(规范长名): "
+                    + ", ".join(sorted(LONG_OVERRIDE_KEYS))
+                    + "\n示例: `/compact set keep 0.20` 或 "
+                    "`/compact set keep_recent_ratio 0.20`"
                 ),
             )
             return
@@ -611,19 +655,7 @@ class CompactPlugin(star.Star):
             )
             return
 
-        # 0. set 不接受自由文本(set 阶段不应有 focus 残留)
-        if parsed.focus:
-            event.set_result(
-                MessageEventResult().message(
-                    f"⚠️ /compact set 不接受额外自由文本:"
-                    f" `{parsed.focus}`\n"
-                    "如需设置 default_focus,使用: "
-                    "`/compact set focus <text>`"
-                ),
-            )
-            return
-
-        # 1. 本进程内立即生效
+        # 本进程内立即生效（不写盘，重启恢复 WebUI 值）
         applied: list[str] = []
         for canonical_key, value in parsed.overrides.items():
             attr = _CONFIG_ATTR_BY_KEY.get(canonical_key)
@@ -632,33 +664,43 @@ class CompactPlugin(star.Star):
             setattr(self, attr, value)
             applied.append(f"{canonical_key} = {value!r}")
 
-        # 2. 写盘
-        persist_errors: list[str] = []
-        for canonical_key, value in parsed.overrides.items():
-            try:
-                from astrbot.core.star.config import update_config
-
-                update_config(CONFIG_NAMESPACE, canonical_key, value)
-            except Exception as e:
-                persist_errors.append(f"{canonical_key}: {e}")
-
-        if persist_errors:
-            event.set_result(
-                MessageEventResult().message(
-                    "⚠️ 已更新本次进程内的配置,但写盘失败:\n"
-                    + "\n".join(f"- {e}" for e in persist_errors)
-                    + "\n\n重启插件后这些改动会丢失。"
-                ),
-            )
-            return
-
         event.set_result(
             MessageEventResult().message(
-                "✅ 配置已持久化保存:\n" + "\n".join(f"- {line}" for line in applied)
+                "✅ 配置已临时生效（重启后恢复 WebUI 值）:\n"
+                + "\n".join(f"- {line}" for line in applied)
             ),
         )
 
     # ===== helpers ==========================================================
+
+    @staticmethod
+    def _extract_command_body(
+        event: AstrMessageEvent,
+        subcommand: str,
+    ) -> str:
+        """从 AstrMessageEvent 中提取 ``/compact <subcommand>`` 之后的正文。
+
+        本实现**不依赖** AstrBot 的 ``GreedyStr`` 参数类型（该类型当前版本
+        的 ``validate_and_convert_params`` 存在 ``is`` identity 比较 bug，
+        会把多 token 截断到第一个空白分隔 token）。通过直接从事件消息字
+        符串剥离唤醒前缀和命令路由前缀，保障多 token 参数的完整性。
+
+        Args:
+            event: AstrBot 消息事件。
+            subcommand: 子命令名（``"run"``／``"preview"``／``"set"``）。
+
+        Returns:
+            ``/compact <subcommand>`` 之后剩余的正文。不含唤醒前缀。
+        """
+        raw = (event.get_message_str() or "").strip()
+        # 1. 剥掉唤醒前缀(例如 "/")
+        if raw.startswith("/"):
+            raw = raw[1:].lstrip()
+        # 2. 剥掉 "compact <subcommand>"（大小写不敏感）
+        cmd_prefix = f"compact {subcommand}"
+        if raw[: len(cmd_prefix)].lower() == cmd_prefix.lower():
+            raw = raw[len(cmd_prefix) :].lstrip()
+        return raw
 
     def _build_compact_args(self, parsed: ParseResult) -> CompactArgs:
         """Build a :class:`CompactArgs` from a parsed subcommand result.

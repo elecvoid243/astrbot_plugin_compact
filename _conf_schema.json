@@ -1,12 +1,12 @@
 {
   "compress_provider_id": {
-    "description": "Optional provider id override for compression. When set, overrides AstrBot core `provider_settings.llm_compress_provider_id`. `provider <id>` on the command line overrides this.",
+    "description": "用于压缩的 LLM Provider ID。留空时按四级回退链（命令行 > 本配置 > 核心配置 llm_compress_provider_id > 会话绑定 provider）查找。命令行 `provider <id>` 优先级高于本项。",
     "type": "string",
     "default": "",
-    "hint": "e.g. deepseek-v3, gpt-4o-mini. Leave empty to use core config."
+    "hint": "例如 deepseek-v3、gpt-4o-mini。留空则使用核心配置。"
   },
   "keep_recent_ratio": {
-    "description": "Default keep_recent_ratio passed to LLMSummaryCompressor. Clamped to [0, 0.3]. `keep <0~0.3>` on the command line overrides this.",
+    "description": "保留最近消息的比例，传给 LLMSummaryCompressor。合法范围 [0, 0.3]，超出自动钳制。命令行 `keep <0~0.3>` 临时覆盖。",
     "type": "float",
     "default": 0.15,
     "min": 0,
@@ -14,32 +14,32 @@
     "hint": "0.0 ~ 0.3"
   },
   "instruction_text": {
-    "description": "Optional custom summary instruction. Empty uses the built-in default.",
+    "description": "自定义摘要指令。留空则使用 AstrBot 内置默认指令。",
     "type": "string",
     "default": "",
-    "hint": "Natural language guidance for the summarizer."
+    "hint": "自然语言描述希望 LLM 如何生成摘要。"
   },
   "min_messages": {
-    "description": "Below this message count, /compact replies with a hint and skips compression.",
+    "description": "低于此消息数时，/compact 会提示「消息数量过少」并跳过压缩。",
     "type": "int",
     "default": 4,
     "min": 1
   },
   "show_summary": {
-    "description": "Reply with a short Chinese message indicating success and (if available) the summary.",
+    "description": "压缩完成后是否在回复中展示摘要预览。",
     "type": "bool",
     "default": true
   },
   "summary_max_chars": {
-    "description": "Maximum number of characters of the LLM summary to inline in the reply.",
+    "description": "摘要预览的最大字符数（超出截断并追加 ...）。",
     "type": "int",
     "default": 800,
     "min": 50
   },
   "default_focus": {
-    "description": "Default focus topic to append to every /compact run. Empty means no default focus.",
+    "description": "每次 /compact run 默认附加的 focus 话题。LLM 生成摘要时会重点关注此话题。为空时无默认 focus。",
     "type": "string",
     "default": "",
-    "hint": "e.g. 鉴权重构. Use `/compact set focus <text>` to change at runtime."
+    "hint": "例如 鉴权重构。运行时可用 `/compact set focus <text>` 修改。"
   }
 }

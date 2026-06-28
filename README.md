@@ -3,7 +3,7 @@
 > Manual LLM-summary context compaction for AstrBot.
 > 在 AstrBot 会话中手动触发 LLM 摘要式上下文压缩，释放 token 配额。
 
-[![Test Coverage](https://img.shields.io/badge/tests-58%2F58-brightgreen)](./tests)
+[![Test Coverage](https://img.shields.io/badge/tests-70%2F70-brightgreen)](./tests)
 [![Python](https://img.shields.io/badge/python-3.12%2B-blue)](.)
 [![Ruff](https://img.shields.io/badge/ruff-passing-green)](.)
 
@@ -77,6 +77,18 @@
 /compact set focus 鉴权重构
 /compact set keep 0.20 provider deepseek-r1   # 一次多个
 ```
+
+> `/compact set` 的 key **同时支持短名与「规范长名」**(即 `/compact config`
+> 输出与 WebUI 配置面板中出现的字段名)。以下两组完全等价:
+>
+> ```
+> /compact set keep 0.20           ≡  /compact set keep_recent_ratio 0.20
+> /compact set provider deepseek-r1 ≡  /compact set compress_provider_id deepseek-r1
+> /compact set min 6                ≡  /compact set min_messages 6
+> /compact set summary off          ≡  /compact set show_summary off
+> /compact set chars 500            ≡  /compact set summary_max_chars 500
+> /compact set focus 鉴权重构        ≡  /compact set default_focus 鉴权重构
+> ```
 
 `/compact set` 立即在当前进程生效, 同时写到 AstrBot 插件配置文件, 重启不丢。
 
@@ -206,7 +218,7 @@ bot: ✅ 压缩完成: 30 → 4 条消息。  # 用新的 keep=0.10
 ### 运行测试
 
 ```bash
-pytest                   # 全部测试 (58 个)
+pytest                   # 全部测试 (70 个)
 pytest tests/test_args.py # 单个模块
 pytest -v                # 详细输出
 pytest -k "set"          # 只跑 /compact set 相关
@@ -230,7 +242,7 @@ astrbot_plugin_compact/
 ├── README.md            # 本文件
 ├── MANUAL_QA.md         # 手工验收清单
 ├── pytest.ini
-└── tests/               # 58 个单元 + 集成测试
+└── tests/               # 70 个单元 + 集成测试
     ├── test_args.py
     ├── test_compressor.py
     ├── test_handler.py
