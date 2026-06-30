@@ -42,5 +42,5 @@ coverage.xml
 .DS_Store
 Thumbs.db
 
-./codegraph
+.codegraph
 .ruff_cache
