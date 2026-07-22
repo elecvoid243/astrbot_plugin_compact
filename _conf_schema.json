@@ -33,7 +33,7 @@
   "summary_max_chars": {
     "description": "摘要预览的最大字符数（超出截断并追加 ...）。",
     "type": "int",
-    "default": 800,
+    "default": 5000,
     "min": 50
   },
   "default_focus": {
